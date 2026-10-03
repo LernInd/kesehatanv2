@@ -1,66 +1,80 @@
-// src/App.tsx
+import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { segmenPeran } from "./api";
+import { AuthProvider, useAuth } from "./auth/AuthProvider";
+import {
+	HanyaTamu,
+	WajibBagian,
+	WajibLogin,
+	WajibPeran,
+} from "./auth/GuardRute";
+import CetakSurat from "./halaman/CetakSurat";
+import Dashboard from "./halaman/Dashboard";
+import LembarSurat from "./halaman/LembarSurat";
+import Masuk from "./halaman/Masuk";
+import Permohonan from "./halaman/Permohonan";
+import PilihPeran from "./halaman/PilihPeran";
+import Riwayat from "./halaman/Riwayat";
+import SantriSakit from "./halaman/SantriSakit";
+import { LayoutAplikasi } from "./komponen/LayoutAplikasi";
 
-import { useState } from "react";
-import reactLogo from "./assets/react.svg";
-import viteLogo from "/vite.svg";
-import cloudflareLogo from "./assets/Cloudflare_Logo.svg";
-import honoLogo from "./assets/hono.svg";
-import "./App.css";
-
-function App() {
-	const [count, setCount] = useState(0);
-	const [name, setName] = useState("unknown");
-
+/** Rute lama /beranda → dasbor milik peran aktif. */
+function Beranda() {
+	const { sesi } = useAuth();
 	return (
-		<>
-			<div>
-				<a href="https://vite.dev" target="_blank">
-					<img src={viteLogo} className="logo" alt="Vite logo" />
-				</a>
-				<a href="https://react.dev" target="_blank">
-					<img src={reactLogo} className="logo react" alt="React logo" />
-				</a>
-				<a href="https://hono.dev/" target="_blank">
-					<img src={honoLogo} className="logo cloudflare" alt="Hono logo" />
-				</a>
-				<a href="https://workers.cloudflare.com/" target="_blank">
-					<img
-						src={cloudflareLogo}
-						className="logo cloudflare"
-						alt="Cloudflare logo"
-					/>
-				</a>
-			</div>
-			<h1>Vite + React + Hono + Cloudflare</h1>
-			<div className="card">
-				<button
-					onClick={() => setCount((count) => count + 1)}
-					aria-label="increment"
-				>
-					count is {count}
-				</button>
-				<p>
-					Edit <code>src/App.tsx</code> and save to test HMR
-				</p>
-			</div>
-			<div className="card">
-				<button
-					onClick={() => {
-						fetch("/api/")
-							.then((res) => res.json() as Promise<{ name: string }>)
-							.then((data) => setName(data.name));
-					}}
-					aria-label="get name"
-				>
-					Name from API is: {name}
-				</button>
-				<p>
-					Edit <code>worker/index.ts</code> to change the name
-				</p>
-			</div>
-			<p className="read-the-docs">Click on the logos to learn more</p>
-		</>
+		<Navigate
+			to={
+				sesi?.peranAktif ? `/${segmenPeran(sesi.peranAktif)}/dashboard` : "/pilih-peran"
+			}
+			replace
+		/>
 	);
 }
 
-export default App;
+/** Lembar cetak A5: halaman penuh tanpa header/sidebar, tetap dijaga bagian & peran. */
+function RuteLembar({ segmen }: { segmen: "putra" | "putri" }) {
+	return (
+		<Route path={`${segmen}/cetak/:id`} element={<WajibBagian segmen={segmen} />}>
+			<Route index element={<LembarSurat />} />
+		</Route>
+	);
+}
+
+function RuteBagian({ segmen }: { segmen: "putra" | "putri" }) {
+	return (
+		<Route path={segmen} element={<WajibBagian segmen={segmen} />}>
+			<Route index element={<Navigate to="dashboard" replace />} />
+			<Route path="dashboard" element={<Dashboard />} />
+			<Route path="sakit" element={<SantriSakit />} />
+			<Route path="permohonan" element={<Permohonan />} />
+			<Route path="riwayat" element={<Riwayat />} />
+			<Route path="cetak" element={<CetakSurat />} />
+		</Route>
+	);
+}
+
+export default function App() {
+	return (
+		<BrowserRouter>
+			<AuthProvider>
+				<Routes>
+					<Route element={<HanyaTamu />}>
+						<Route path="/masuk" element={<Masuk />} />
+					</Route>
+					<Route element={<WajibLogin />}>
+						<Route path="/pilih-peran" element={<PilihPeran />} />
+						<Route element={<WajibPeran />}>
+							<Route path="/beranda" element={<Beranda />} />
+							{RuteLembar({ segmen: "putra" })}
+							{RuteLembar({ segmen: "putri" })}
+							<Route element={<LayoutAplikasi />}>
+								{RuteBagian({ segmen: "putra" })}
+								{RuteBagian({ segmen: "putri" })}
+							</Route>
+						</Route>
+					</Route>
+					<Route path="*" element={<Navigate to="/masuk" replace />} />
+				</Routes>
+			</AuthProvider>
+		</BrowserRouter>
+	);
+}

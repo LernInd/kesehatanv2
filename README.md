@@ -1,90 +1,67 @@
-# React + Vite + Hono + Cloudflare Workers
+# Kesehatan Pesantren v2
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/cloudflare/templates/tree/main/vite-react-template)
+Aplikasi kesehatan santri untuk **Admin Kesehatan Putra** dan **Admin Kesehatan Putri**:
+dasbor, santri sakit hari ini, permohonan (penerbitan) surat sakit, riwayat per siswa, dan
+cetak surat sakit A5 berkode QR.
 
-This template provides a minimal setup for building a React application with TypeScript and Vite, designed to run on Cloudflare Workers. It features hot module replacement, ESLint integration, and the flexibility of Workers deployments.
+Stack: React 19 + Vite, Hono di Cloudflare Workers, Supabase (login & data induk), dan
+Cloudflare D1 `presensi-db` (status sakit + presensi).
 
-![React + TypeScript + Vite + Cloudflare Workers](https://imagedelivery.net/wSMYJvS3Xw-n339CbDyDIA/fc7b4b62-442b-4769-641b-ad4422d74300/public)
+## Arsitektur singkat
 
-<!-- dash-content-start -->
+- **Login** memakai Supabase `activity-db` (username → `<username>@admin-kegiatan.internal`).
+  Token **tidak pernah** sampai ke peramban: Worker menyimpannya di cookie `__Host-` HttpOnly,
+  Secure, SameSite=Strict, dan memverifikasi ulang ke Supabase di setiap permintaan.
+  Setelah login pengguna selalu ke `/pilih-peran` (satu pengguna bisa banyak peran).
+- Hanya peran `adminkesehatanputra` dan `adminkesehatanputri` yang diizinkan
+  (`src/worker/peran.ts`). **Gender (`bagian`) selalu diturunkan dari peran aktif di server**,
+  tidak pernah dari peramban.
+- **Data santri** (nama, foto, lembaga, kelas) dibaca dari Supabase dengan token pengguna
+  (RLS yang memutuskan). Tidak ada `service_role`.
+- **Status sakit** dicatat di D1 `presensi-db`. Gangguan sementara Supabase dijawab 503 tanpa
+  menghapus sesi.
 
-🚀 Supercharge your web development with this powerful stack:
+## Penerapan ke presensi-db (SKEMA.md)
 
-- [**React**](https://react.dev/) - A modern UI library for building interactive interfaces
-- [**Vite**](https://vite.dev/) - Lightning-fast build tooling and development server
-- [**Hono**](https://hono.dev/) - Ultralight, modern backend framework
-- [**Cloudflare Workers**](https://developers.cloudflare.com/workers/) - Edge computing platform for global deployment
+Kesehatan adalah satu-satunya penulis status `sakit`. Satu surat diterbitkan/dibatalkan dalam
+**satu transaksi** (`db.batch`) — kode di `src/worker/presensi_sakit.ts`:
 
-### ✨ Key Features
+| Aksi | Yang ditulis |
+|---|---|
+| Terbit | `surat_sakit` → jejak `riwayat_presensi` (`Surat sakit <id>: <keterangan>`) → `presensi_pembelajaran.status='sakit'` → `presensi_harian` (tiap tanggal × `masuk`/`pulang`, `cara='surat'`) |
+| Batal | pulihkan `presensi_pembelajaran` dari jejak terbaru → hapus `presensi_harian` ber-`cara='surat'` pada rentang surat → tandai surat dibatalkan (tidak dihapus) |
 
-- 🔥 Hot Module Replacement (HMR) for rapid development
-- 📦 TypeScript support out of the box
-- 🛠️ ESLint configuration included
-- ⚡ Zero-config deployment to Cloudflare's global network
-- 🎯 API routes with Hono's elegant routing
-- 🔄 Full-stack development setup
-- 🔎 Built-in Observability to monitor your Worker
+Aturan yang dijaga uji kontrak (`npm test`): awalan jejak penerap = pembatal, penghapusan selalu
+berlingkup `cara = 'surat'`, jejak ditulis sebelum menimpa, pembatalan tidak menulis jejak baru.
+`presensi_harian.lembaga_id` memakai lembaga ber-kelas santri, bila tak ada → lembaga yang
+paling awal didaftarkan; santri tanpa lembaga ditolak (400).
 
-Get started in minutes with local development or deploy directly via the Cloudflare dashboard. Perfect for building modern, performant web applications at the edge.
+> **Hati-hati:** menimpa tanpa syarat berarti pindai `qr`/izin yang tertimpa surat hilang saat
+> surat dibatalkan (perilaku bawaan sistem presensi). Begitu versi ini **dideploy**, surat
+> pertama menulis ke presensi **produksi**.
 
-<!-- dash-content-end -->
-
-## Getting Started
-
-To start a new project with this template, run:
-
-```bash
-npm create cloudflare@latest -- --template=cloudflare/templates/vite-react-template
-```
-
-A live deployment of this template is available at:
-[https://react-vite-template.templates.workers.dev](https://react-vite-template.templates.workers.dev)
-
-## Development
-
-Install dependencies:
+## Menjalankan secara lokal
 
 ```bash
 npm install
+cp .dev.vars.example .dev.vars          # isi SESSION_SECRET (acak, ≥ 32 karakter)
+
+# D1 LOKAL saja (jangan --remote). Jangan memasang dari schema.sql presensi: ia menyimpang
+# dari produksi (SKEMA.md §1). Berkas ini salinan DDL hidup presensi-db.
+npx wrangler d1 execute presensi-db --local --file=migrations/0001_surat_sakit.sql
+npx wrangler d1 execute presensi-db --local --file=migrations/0002_presensi_lokal.sql
+
+npm run dev                              # http://localhost:5173
 ```
 
-Start the development server with:
+Perintah lain: `npm run lint`, `npm test`, `npm run build`, `npm run cf-typegen`.
+
+Untuk produksi, `SESSION_SECRET` diatur dengan `npx wrangler secret put SESSION_SECRET`.
+Kunci Supabase di `wrangler.json` adalah kunci *publishable* (memang publik).
+
+Membaca skema produksi yang sebenarnya (baca saja):
 
 ```bash
-npm run dev
+npx wrangler d1 execute presensi-db --remote \
+  --command "select sql from sqlite_master where type in ('table','index')"
 ```
-
-Your application will be available at [http://localhost:5173](http://localhost:5173).
-
-## Production
-
-Build your project for production:
-
-```bash
-npm run build
-```
-
-Preview your build locally:
-
-```bash
-npm run preview
-```
-
-Deploy your project to Cloudflare Workers:
-
-```bash
-npm run build && npm run deploy
-```
-
-Monitor your workers:
-
-```bash
-npx wrangler tail
-```
-
-## Additional Resources
-
-- [Cloudflare Workers Documentation](https://developers.cloudflare.com/workers/)
-- [Vite Documentation](https://vitejs.dev/guide/)
-- [React Documentation](https://reactjs.org/)
-- [Hono Documentation](https://hono.dev/)
